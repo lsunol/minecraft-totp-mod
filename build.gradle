@@ -1,0 +1,75 @@
+plugins {
+	id 'fabric-loom' version "${loom_version}"
+	id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// java-otp and commons-codec live on Maven Central.
+	mavenCentral()
+}
+
+loom {
+	// Server-side-only mod: a single 'main' source set, no client split.
+	mods {
+		"totpauth" {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+	// Official Mojang mappings (Yarn is deprecated). Using these means accepting Mojang's mappings licence.
+	mappings loom.officialMojangMappings()
+
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+	// Bundled into the produced jar via Fabric's Jar-in-Jar.
+	// 'implementation' puts them on the compile/runtime classpath; 'include' nests them inside the jar.
+	include(implementation("com.eatthepath:java-otp:${project.javaotp_version}"))
+	include(implementation("commons-codec:commons-codec:${project.commonscodec_version}"))
+	// NOTE: Gson is deliberately NOT bundled - it ships with the Minecraft server.
+}
+
+processResources {
+	inputs.property "version", project.version
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	// Minecraft 1.21.11 targets Java 21.
+	it.options.release = 21
+}
+
+java {
+	withSourcesJar()
+}
+
+jar {
+	from("LICENSE") {
+		rename { "${it}_${project.base.archivesName.get()}" }
+	}
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			artifactId = project.archives_base_name
+			from components.java
+		}
+	}
+	repositories {
+		// Add a deployment target here if you ever publish to a Maven repo.
+	}
+}

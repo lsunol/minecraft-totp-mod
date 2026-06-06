@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"id": "totpauth",
+	"version": "${version}",
+	"name": "TotpAuth",
+	"description": "Server-side TOTP (RFC 6238) authentication gate for offline-mode Fabric servers. Works with vanilla clients - no client mod required.",
+	"authors": [
+		"Lluis Sunyol"
+	],
+	"contact": {
+		"homepage": "https://github.com/bielsunol-blip/minecraft-totp-mod",
+		"sources": "https://github.com/bielsunol-blip/minecraft-totp-mod"
+	},
+	"license": "MIT",
+	"environment": "server",
+	"entrypoints": {
+		"main": [
+			"cat.lluissunol.totpauth.TotpAuthMod"
+		]
+	},
+	"mixins": [
+		"totpauth.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

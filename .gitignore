@@ -1,0 +1,36 @@
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# Fabric Loom
+run/
+.loom-cache/
+*.log
+
+# Eclipse
+*.launch
+.classpath
+.project
+.settings/
+bin/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Java
+hs_err_pid*
+replay_pid*
+
+# Do NOT ignore the Gradle wrapper jar - it must be committed.
+!gradle/wrapper/gradle-wrapper.jar
