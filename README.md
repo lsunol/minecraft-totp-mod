@@ -100,7 +100,9 @@ Shape:
       "secret": "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
       "status": "ENROLLED",
       "createdAt": 1749200000000,
-      "confirmedAt": 1749200100000
+      "confirmedAt": 1749200100000,
+      "trustedIp": "203.0.113.7",
+      "trustedIpAt": 1749200100000
     }
   }
 }
@@ -109,6 +111,9 @@ Shape:
 - Keys are **lowercase** player names.
 - `uuid` is the offline UUID: `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`.
 - `status` is `PENDING` (secret issued, not yet confirmed) or `ENROLLED`.
+- `trustedIp` / `trustedIpAt` are the last IP this player passed a TOTP check from
+  and when — used for the **trusted-IP grace window** (see *Workflow*). Both are
+  absent until the first successful `/2fa login`.
 
 A second file, `frozen_positions.json`, sits next to it as a transient safety net
 for the limbo teleport (see *How the freeze works*). It records where each
@@ -145,7 +150,27 @@ filesystems, but you should still:
    the copied key/link) and runs `/2fa login <code>`. The first valid code confirms
    enrollment (`PENDING → ENROLLED`) and returns them from limbo to where they were.
 4. **On every later join** the player is frozen again and simply runs
-   `/2fa login <code>` to play. Authentication lasts for that session only.
+   `/2fa login <code>` to play — **unless they are joining from a trusted IP**
+   (see below), in which case they are let straight in without a code.
+
+#### Trusted-IP grace window
+
+To avoid re-typing a code on every single join, the IP an enrolled player last
+passed a TOTP check from is remembered (`trustedIp` in `users.json`). For **7 days**
+after that login, rejoining from the **same IP** authenticates them automatically —
+they are never frozen and see *"authenticated automatically from your trusted IP"*.
+
+- The window is measured from the last successful `/2fa login`; it is **not** slid
+  forward by automatic logins, so an enrolled player still enters a code **at most
+  once per week** per IP (and immediately whenever their IP changes).
+- It applies only to **already-enrolled** players — first-time enrollment always
+  requires a real code.
+- `/2fa reset` (and re-issuing a secret with `/2fa approve`) clears the trusted IP.
+
+> ⚠️ This is a convenience/security trade-off: anyone sharing that exact IP (same
+> NAT/household, the same VPN exit, ISP CGNAT) within the window could join as the
+> player without a code. The trust is per-player and IP-exact. If you don't want it,
+> set the window to `0` (`TrustedIp.WINDOW_MILLIS`).
 
 ### Commands
 
@@ -200,8 +225,10 @@ For any non-authenticated **real** player:
 name so Carpet remains an optional dependency) are not real logins and **bypass
 the gate entirely**.
 
-Authentication is per-session and in-memory only — re-auth is required on every
-join (no IP grace window, by design).
+Authentication is otherwise per-session and in-memory only — re-auth is required
+on every join, with the single exception of the **trusted-IP grace window**
+(rejoining from the IP you authenticated from within the last 7 days; see
+*Workflow*). That window is the only state that survives a disconnect.
 
 ### Version-specific TODOs
 

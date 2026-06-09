@@ -8,6 +8,7 @@ import cat.lluissunol.totpauth.totp.TotpService;
 import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
 import cat.lluissunol.totpauth.util.OfflineUuid;
+import cat.lluissunol.totpauth.util.PlayerIp;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -107,11 +108,21 @@ public final class TotpCommand {
             return 0;
         }
 
+        long now = System.currentTimeMillis();
+        UserRecord updated = record;
         if (record.state() == UserState.PENDING) {
-            store.put(record.withState(UserState.ENROLLED, System.currentTimeMillis()));
+            updated = updated.withState(UserState.ENROLLED, now);
             player.sendSystemMessage(Messages.good("Enrollment confirmed - you're in. Welcome!"));
         } else {
             player.sendSystemMessage(Messages.good("Authenticated. Welcome back!"));
+        }
+        // Remember this IP so rejoining from it skips the prompt for the trust window.
+        String ip = PlayerIp.of(player);
+        if (ip != null) {
+            updated = updated.withTrustedIp(ip, now);
+        }
+        if (updated != record) {
+            store.put(updated);
         }
         sessions.authenticate(player.getUUID());
         limbo.release(player);
@@ -132,7 +143,7 @@ public final class TotpCommand {
 
         String secret = totp.generateSecret();
         store.put(new UserRecord(name, OfflineUuid.of(rawName), secret, UserState.PENDING,
-                System.currentTimeMillis(), null));
+                System.currentTimeMillis(), null, null, null));
 
         ServerPlayer online = server.getPlayerList().getPlayerByName(rawName);
         if (online != null) {
