@@ -101,6 +101,16 @@ public final class TotpService {
                 + "&period=" + STEP.toSeconds();
     }
 
+    /**
+     * A trimmed otpauth:// URI carrying only the label and secret, so the QR
+     * stays small enough to render as ASCII in chat. The omitted parameters
+     * (issuer query, SHA1, 6 digits, 30s) are the universal authenticator
+     * defaults, so scanning this yields the same configuration.
+     */
+    public String compactOtpauthUri(String accountName, String base32Secret) {
+        return "otpauth://totp/" + urlEncode(ISSUER + ":" + accountName) + "?secret=" + base32Secret;
+    }
+
     /** Group a secret into blocks of four characters for easier manual entry. */
     public String formatForDisplay(String base32Secret) {
         return base32Secret.replaceAll("(.{4})(?=.)", "$1 ");

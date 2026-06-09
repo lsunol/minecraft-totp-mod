@@ -5,9 +5,9 @@ import cat.lluissunol.totpauth.auth.UserRecord;
 import cat.lluissunol.totpauth.auth.UserState;
 import cat.lluissunol.totpauth.storage.UserStore;
 import cat.lluissunol.totpauth.totp.TotpService;
+import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
 import cat.lluissunol.totpauth.util.OfflineUuid;
-import cat.lluissunol.totpauth.util.PlayerFreezer;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -40,11 +40,13 @@ public final class TotpCommand {
     private final UserStore store;
     private final SessionManager sessions;
     private final TotpService totp;
+    private final Limbo limbo;
 
-    public TotpCommand(UserStore store, SessionManager sessions, TotpService totp) {
+    public TotpCommand(UserStore store, SessionManager sessions, TotpService totp, Limbo limbo) {
         this.store = store;
         this.sessions = sessions;
         this.totp = totp;
+        this.limbo = limbo;
     }
 
     public void register(CommandDispatcher<CommandSourceStack> dispatcher) {
@@ -97,7 +99,7 @@ public final class TotpCommand {
             player.sendSystemMessage(Messages.good("Authenticated. Welcome back!"));
         }
         sessions.authenticate(player.getUUID());
-        PlayerFreezer.unfreeze(player);
+        limbo.release(player);
         return Command.SINGLE_SUCCESS;
     }
 
@@ -141,7 +143,7 @@ public final class TotpCommand {
         ServerPlayer online = server.getPlayerList().getPlayerByName(rawName);
         if (online != null) {
             sessions.deauthenticate(online.getUUID());
-            PlayerFreezer.freeze(online);
+            limbo.send(online);
             online.sendSystemMessage(Messages.warn(
                     "Your 2FA registration was reset by an admin. You'll need to be approved again."));
         }

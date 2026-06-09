@@ -32,6 +32,7 @@ separately):
 
 - `com.eatthepath:java-otp:0.4.0` — TOTP generation/verification
 - `commons-codec:commons-codec:1.18.0` — Base32 encode/decode of secrets
+- `com.google.zxing:core:3.5.3` — QR encoding for the enrollment setup (rendered as ASCII in chat)
 
 Gson is **not** bundled — it already ships on the Minecraft server classpath.
 
@@ -109,6 +110,12 @@ Shape:
 - `uuid` is the offline UUID: `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`.
 - `status` is `PENDING` (secret issued, not yet confirmed) or `ENROLLED`.
 
+A second file, `frozen_positions.json`, sits next to it as a transient safety net
+for the limbo teleport (see *How the freeze works*). It records where each
+not-yet-authenticated player really was, so a disconnect or crash mid-limbo can
+never strand them at the limbo coordinates. Entries are removed the moment a
+player authenticates; under normal operation the file is empty.
+
 ### 🔐 Security note
 
 **Secrets are stored in cleartext.** Anyone who can read `users.json` can generate
@@ -125,16 +132,18 @@ filesystems, but you should still:
 
 ### How a player gets in (happy path)
 
-1. **Player joins** for the first time. They are frozen (blind, invisible, can't
-   move/interact/chat) and told they are pending approval. Every online op sees:
+1. **Player joins** for the first time. They are frozen — lifted to a safe limbo
+   high in the sky (invulnerable, no gravity, blind/invisible, can't
+   move/interact/chat) — and told they are pending approval. Every online op sees:
    `Player <name> requests access. Use /2fa approve <name>`.
 2. **An op approves them:** `/2fa approve <name>`. The mod generates a secret and
-   privately shows the player the Base32 secret + an `otpauth://` link + setup
-   instructions. (If the player is offline, the secret is shown on their next
-   join while they remain `PENDING`.)
-3. **Player adds the secret** to their authenticator app (TOTP, SHA1, 6 digits,
-   30s) and runs `/2fa login <code>`. The first valid code confirms enrollment
-   (`PENDING → ENROLLED`) and unfreezes them.
+   privately shows the player a **scannable QR code** (rendered as ASCII in chat),
+   the Base32 secret and an `otpauth://` setup link — the secret and link are
+   **click-to-copy** and the login command is click-to-suggest. (If the player is
+   offline, this is shown on their next join while they remain `PENDING`.)
+3. **Player adds the secret** to their authenticator app (scan the QR, or paste
+   the copied key/link) and runs `/2fa login <code>`. The first valid code confirms
+   enrollment (`PENDING → ENROLLED`) and returns them from limbo to where they were.
 4. **On every later join** the player is frozen again and simply runs
    `/2fa login <code>` to play. Authentication lasts for that session only.
 
@@ -167,8 +176,15 @@ You can never permanently lock yourself out as long as you have console access.
 
 ## How the freeze works
 
-For any non-authenticated player:
+For any non-authenticated **real** player:
 
+- **Limbo teleport** (`Limbo`): the player is lifted straight up to a safe height
+  with **no gravity** and made **invulnerable**, so creepers, mobs, fall damage and
+  drowning can't touch them and there is nothing nearby to interact with. Their
+  real position is remembered (`frozen_positions.json`) and restored on login.
+  This is what removes the old client-side misprediction (walking around / breaking
+  blocks on your own screen, then snapping back) **and** the very real risk of
+  dying while "frozen".
 - **Movement, inventory/container clicks, chat, and commands** are cancelled at
   the packet boundary by a Mixin on `ServerGamePacketListenerImpl`
   (`handleMovePlayer`, `handleContainerClick`, `handlePlayerAction`,
@@ -177,8 +193,12 @@ For any non-authenticated player:
 - **Block break/use, item use, and entity attack/interact** are additionally
   blocked via Fabric API interaction callbacks (`AttackBlockCallback`,
   `UseBlockCallback`, `AttackEntityCallback`, `UseEntityCallback`).
-- **Blindness + Invisibility** are applied so the world can't be scouted while
-  waiting at the login prompt.
+- **Blindness + Invisibility** are applied so the world can't be scouted (chat —
+  and therefore the enrollment QR — stays readable).
+
+**Server-side fake players** (Carpet's `/player … spawn` bots, matched by class
+name so Carpet remains an optional dependency) are not real logins and **bypass
+the gate entirely**.
 
 Authentication is per-session and in-memory only — re-auth is required on every
 join (no IP grace window, by design).
@@ -197,8 +217,10 @@ deliberately flagged to **verify against the decompiled 1.21.11 sources**
    clearly-marked TODO with a ready-to-enable `@Inject`. The normal
    `/2fa login <code>` path is **unsigned** and is fully handled.
 2. **Status effects** (`PlayerFreezer`): the `MobEffects.BLINDNESS/INVISIBILITY`
-   holder constants and the 6-arg `MobEffectInstance` constructor are flagged to
-   double-check, though they have been stable through 1.21.x.
+   holder constants and the 6-arg `MobEffectInstance` constructor — verified
+   against the 1.21.11 sources (this drop also renamed `ResourceLocation` →
+   `Identifier` and reworked `Style.withFont` to take a `FontDescription`, both
+   handled in `AsciiQr`).
 
 Each injected mixin method uses `defaultRequire = 1`, so if any targeted name is
 stale the server fails fast at load with a clear error instead of silently
