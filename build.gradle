@@ -37,6 +37,8 @@ dependencies {
 	// 'implementation' puts them on the compile/runtime classpath; 'include' nests them inside the jar.
 	include(implementation("com.eatthepath:java-otp:${project.javaotp_version}"))
 	include(implementation("commons-codec:commons-codec:${project.commonscodec_version}"))
+	// QR encoder for first-time enrollment (we only use the encoder; pure Java, server-safe).
+	include(implementation("com.google.zxing:core:${project.zxing_version}"))
 	// NOTE: Gson is deliberately NOT bundled - it ships with the Minecraft server.
 }
 

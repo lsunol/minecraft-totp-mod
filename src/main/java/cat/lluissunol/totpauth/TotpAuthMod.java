@@ -4,10 +4,12 @@ import cat.lluissunol.totpauth.auth.SessionManager;
 import cat.lluissunol.totpauth.auth.UserRecord;
 import cat.lluissunol.totpauth.auth.UserState;
 import cat.lluissunol.totpauth.command.TotpCommand;
+import cat.lluissunol.totpauth.storage.FrozenPositionStore;
 import cat.lluissunol.totpauth.storage.UserStore;
 import cat.lluissunol.totpauth.totp.TotpService;
+import cat.lluissunol.totpauth.util.FakePlayers;
+import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
-import cat.lluissunol.totpauth.util.PlayerFreezer;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -30,9 +32,10 @@ import java.util.UUID;
 /**
  * Server-side TOTP authentication gate.
  *
- * <p>On an offline-mode server every player is frozen on join until they submit
- * a valid TOTP code via {@code /2fa login}. New players must be approved by an
- * admin (or the console) with {@code /2fa approve}.</p>
+ * <p>On an offline-mode server every (real) player is sent to a safe limbo on
+ * join until they submit a valid TOTP code via {@code /2fa login}. New players
+ * must be approved by an admin (or the console) with {@code /2fa approve}.
+ * Server-side fake players (e.g. Carpet bots) bypass the gate entirely.</p>
  */
 public final class TotpAuthMod implements ModInitializer {
 
@@ -44,21 +47,27 @@ public final class TotpAuthMod implements ModInitializer {
 
     private UserStore store;
     private TotpService totp;
+    private Limbo limbo;
 
     @Override
     public void onInitialize() {
         sessions = new SessionManager();
         totp = new TotpService();
 
-        Path file = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID).resolve("users.json");
-        store = new UserStore(file, LOGGER);
+        Path configDir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
+        store = new UserStore(configDir.resolve("users.json"), LOGGER);
         store.load();
+
+        FrozenPositionStore frozenPositions =
+                new FrozenPositionStore(configDir.resolve("frozen_positions.json"), LOGGER);
+        frozenPositions.load();
+        limbo = new Limbo(frozenPositions);
 
         registerCommands();
         registerInteractionGuards();
         registerJoinLeave();
 
-        LOGGER.info("[TotpAuth] Initialised. User store: {}", file);
+        LOGGER.info("[TotpAuth] Initialised. User store: {}", configDir.resolve("users.json"));
     }
 
     public static SessionManager sessions() {
@@ -66,7 +75,7 @@ public final class TotpAuthMod implements ModInitializer {
     }
 
     private void registerCommands() {
-        TotpCommand command = new TotpCommand(store, sessions, totp);
+        TotpCommand command = new TotpCommand(store, sessions, totp, limbo);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 command.register(dispatcher));
     }
@@ -90,14 +99,20 @@ public final class TotpAuthMod implements ModInitializer {
 
     private void registerJoinLeave() {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onJoin(server, handler.player));
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-                sessions.deauthenticate(handler.player.getUUID()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
     }
 
     private void onJoin(MinecraftServer server, ServerPlayer player) {
-        // Every join starts unauthenticated, then we freeze and prompt according to state.
+        // Carpet (and similar) fake players have no human behind them to ever
+        // authenticate, so they bypass the gate completely.
+        if (FakePlayers.isFake(player)) {
+            sessions.authenticate(player.getUUID());
+            return;
+        }
+
+        // Every real join starts unauthenticated, then we freeze and prompt by state.
         sessions.deauthenticate(player.getUUID());
-        PlayerFreezer.freeze(player);
+        limbo.send(player);
 
         String name = player.nameAndId().name().toLowerCase(Locale.ROOT);
         Optional<UserRecord> record = store.get(name);
@@ -112,6 +127,16 @@ public final class TotpAuthMod implements ModInitializer {
             player.sendSystemMessage(Messages.warn(
                     "This server requires 2FA. Authenticate with /2fa login <code>."));
         }
+    }
+
+    private void onDisconnect(ServerPlayer player) {
+        // A player who never authenticated is still in limbo: write their real
+        // position back onto the entity before it is saved, so a disconnect can
+        // never persist the limbo coordinates.
+        if (!sessions.isAuthenticated(player.getUUID())) {
+            limbo.restoreForSave(player);
+        }
+        sessions.deauthenticate(player.getUUID());
     }
 
     private void notifyOps(MinecraftServer server, String playerName) {
