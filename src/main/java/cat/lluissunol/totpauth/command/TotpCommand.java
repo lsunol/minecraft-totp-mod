@@ -57,10 +57,25 @@ public final class TotpCommand {
                 .then(Commands.literal("approve")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("player", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    // Suggest online players who are not yet ENROLLED.
+                                    ctx.getSource().getServer().getPlayerList().getPlayers().stream()
+                                            .map(p -> p.nameAndId().name())
+                                            .filter(n -> store.get(n.toLowerCase(Locale.ROOT))
+                                                    .map(r -> r.state() != UserState.ENROLLED)
+                                                    .orElse(true))
+                                            .forEach(builder::suggest);
+                                    return builder.buildFuture();
+                                })
                                 .executes(ctx -> approve(ctx, StringArgumentType.getString(ctx, "player")))))
                 .then(Commands.literal("reset")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("player", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    // Suggest all registered players (ENROLLED + PENDING).
+                                    store.all().forEach(r -> builder.suggest(r.name()));
+                                    return builder.buildFuture();
+                                })
                                 .executes(ctx -> reset(ctx, StringArgumentType.getString(ctx, "player")))))
                 .then(Commands.literal("list")
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
