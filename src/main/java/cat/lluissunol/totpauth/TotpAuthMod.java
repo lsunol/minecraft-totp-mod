@@ -1,6 +1,7 @@
 package cat.lluissunol.totpauth;
 
 import cat.lluissunol.totpauth.auth.SessionManager;
+import cat.lluissunol.totpauth.auth.TrustedIp;
 import cat.lluissunol.totpauth.auth.UserRecord;
 import cat.lluissunol.totpauth.auth.UserState;
 import cat.lluissunol.totpauth.command.TotpCommand;
@@ -10,6 +11,7 @@ import cat.lluissunol.totpauth.totp.TotpService;
 import cat.lluissunol.totpauth.util.FakePlayers;
 import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
+import cat.lluissunol.totpauth.util.PlayerIp;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -110,12 +112,23 @@ public final class TotpAuthMod implements ModInitializer {
             return;
         }
 
-        // Every real join starts unauthenticated, then we freeze and prompt by state.
-        sessions.deauthenticate(player.getUUID());
-        limbo.send(player);
-
         String name = player.nameAndId().name().toLowerCase(Locale.ROOT);
         Optional<UserRecord> record = store.get(name);
+
+        // Trusted-IP grace: an ENROLLED player rejoining from the IP they last
+        // authenticated with (within the trust window) skips the TOTP prompt and
+        // is never frozen.
+        if (record.isPresent() && record.get().state() == UserState.ENROLLED
+                && TrustedIp.isValid(record.get(), PlayerIp.of(player), System.currentTimeMillis())) {
+            sessions.authenticate(player.getUUID());
+            player.sendSystemMessage(Messages.good(
+                    "Welcome back - authenticated automatically from your trusted IP."));
+            return;
+        }
+
+        // Otherwise every real join starts unauthenticated: freeze and prompt by state.
+        sessions.deauthenticate(player.getUUID());
+        limbo.send(player);
 
         if (record.isEmpty()) {
             player.sendSystemMessage(Messages.warn(

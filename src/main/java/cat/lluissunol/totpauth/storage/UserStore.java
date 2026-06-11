@@ -37,7 +37,7 @@ import java.util.UUID;
  *   "users": {
  *     "&lt;lowercase_name&gt;": {
  *       "uuid": "...", "secret": "BASE32", "status": "PENDING|ENROLLED",
- *       "createdAt": 0, "confirmedAt": 0
+ *       "createdAt": 0, "confirmedAt": 0, "trustedIp": "1.2.3.4", "trustedIpAt": 0
  *     }
  *   }
  * }
@@ -73,7 +73,8 @@ public final class UserStore {
                     String name = entry.getKey().toLowerCase(Locale.ROOT);
                     UUID uuid = stored.uuid != null ? UUID.fromString(stored.uuid) : null;
                     users.put(name, new UserRecord(name, uuid, stored.secret,
-                            parseState(stored.status), stored.createdAt, stored.confirmedAt));
+                            parseState(stored.status), stored.createdAt, stored.confirmedAt,
+                            stored.trustedIp, stored.trustedIpAt));
                 }
             }
             logger.info("[TotpAuth] Loaded {} user record(s) from {}.", users.size(), file);
@@ -93,6 +94,8 @@ public final class UserStore {
             stored.status = record.state().name();
             stored.createdAt = record.createdAt();
             stored.confirmedAt = record.confirmedAt();
+            stored.trustedIp = record.trustedIp();
+            stored.trustedIpAt = record.trustedIpAt();
             out.users.put(record.name(), stored);
         }
 
@@ -164,5 +167,7 @@ public final class UserStore {
         String status;
         long createdAt;
         Long confirmedAt;
+        String trustedIp;
+        Long trustedIpAt;
     }
 }

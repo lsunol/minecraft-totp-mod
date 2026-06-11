@@ -28,12 +28,12 @@ Single-entrypoint server-side Fabric mod (`TotpAuthMod implements ModInitializer
 
 | Package | Responsibility |
 |---|---|
-| `auth` | `SessionManager` (in-memory, per-join UUID set), `UserRecord` (immutable value), `UserState` (PENDING / ENROLLED) |
+| `auth` | `SessionManager` (in-memory, per-join UUID set), `UserRecord` (immutable value), `UserState` (PENDING / ENROLLED), `TrustedIp` (grace-window policy + constant) |
 | `storage` | `UserStore` (users), `FrozenPositionStore` (limbo positions) — Gson-backed JSON, atomic write, POSIX-only `chmod 600` |
 | `totp` | `TotpService` — wraps `java-otp` + `commons-codec` for HMAC-SHA1 TOTP (RFC 6238) |
-| `command` | `TotpCommand` — registers `/2fa` with sub-commands `login`, `approve`, `reset`, `list` |
+| `command` | `TotpCommand` — registers `/2fa` with sub-commands `login`, `approve`, `reset`, `list` (`approve`/`reset` tab-complete player names) |
 | `mixin` | `ServerGamePacketListenerImplMixin` — packet-boundary freeze for unauthenticated players |
-| `util` | `Limbo` (teleport-to-safety freeze), `PlayerFreezer` (blind/invisible effects), `FakePlayers` (Carpet-bot detection), `AsciiQr` + `QrEncoder` (chat QR), `Messages`, `OfflineUuid` |
+| `util` | `Limbo` (teleport-to-safety freeze), `PlayerFreezer` (blind/invisible effects), `FakePlayers` (Carpet-bot detection), `PlayerIp` (remote-IP extraction), `AsciiQr` + `QrEncoder` (chat QR), `Messages`, `OfflineUuid` |
 
 ### Freeze: limbo + two packet/callback layers
 
@@ -51,7 +51,8 @@ Real unauthenticated players are handled in three complementary ways:
 
 - **Player names are always lowercased** (`Locale.ROOT`) before storage and lookup.
 - **UUIDs are offline UUIDs** — `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")` — not Mojang account UUIDs.
-- **Session auth is purely in-memory**: `SessionManager` is cleared on disconnect and on every join, so re-auth is always required.
+- **Session auth is purely in-memory**: `SessionManager` is cleared on disconnect and on every join. Re-auth is required on every join *except* the trusted-IP grace window (below), which is the only thing that can re-populate the session without a code.
+- **Trusted-IP grace window** (`TrustedIp`, default `WINDOW_MILLIS = 7 days`): on a successful `/2fa login`, the player's remote IP (`PlayerIp.of`, from `ServerGamePacketListenerImpl.getRemoteAddress()`, host only — no port) is written to `UserRecord.trustedIp/trustedIpAt`. In `onJoin`, an `ENROLLED` player whose join IP matches and is within the window is auto-authenticated and **never sent to limbo**. The window is anchored to the last real login (auto-logins do **not** slide it), so a code is entered at most once per window per IP. Only applies to `ENROLLED`; `/2fa reset` and re-`approve` clear it.
 - **`UserStore.save()` is called synchronously on every mutation** and uses atomic move (fallback to non-atomic on Windows).
 - **Gson is not bundled** — it is assumed present on the Minecraft server classpath. `java-otp`, `commons-codec` and `com.google.zxing:core` are Jar-in-Jar'd.
 - **Fake players (Carpet bots) are never gated** — detected by class name and auto-authenticated on join, so all three freeze layers treat them as logged in.
