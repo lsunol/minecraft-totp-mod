@@ -255,6 +255,33 @@ leaving a hole in the freeze.
 
 ---
 
+## Troubleshooting
+
+### Every code is rejected ("Invalid code")
+
+TOTP is time-based, so the **server clock must be within ~30 seconds of real
+time**. A drifted clock (common on Docker/Crafty hosts after a sleep/resume) makes
+*every* code fail no matter how many times you re-issue the secret. The mod now
+diagnoses this for you on a failed `/2fa login`:
+
+- *"the server clock is out of sync by ~Ns"* → the code is correct but the **server
+  clock is wrong**. Sync it (the server log shows the exact skew and direction):
+  ```bash
+  # on the host running the server
+  timedatectl set-ntp true     # or: sudo ntpdate -u pool.ntp.org
+  # Docker: restart the container so it re-reads the host clock, and make sure
+  # the HOST clock is synced — containers inherit it.
+  ```
+- *"it doesn't match this server's secret at all"* → the **authenticator holds a
+  different/old secret**. Delete that entry in your app and re-add it from the key
+  shown by `/2fa` — prefer clicking **Secret** to copy the key over scanning the
+  ASCII QR, which is a best-effort convenience and can be hard for a phone to read.
+
+The acceptance window stays at ±30 s by design; widening it would weaken the
+second factor, so the fix is to sync the clock rather than tolerate more drift.
+
+---
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
