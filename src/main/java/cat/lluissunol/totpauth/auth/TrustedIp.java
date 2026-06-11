@@ -1,7 +1,5 @@
 package cat.lluissunol.totpauth.auth;
 
-import java.time.Duration;
-
 /**
  * Trusted-IP grace window.
  *
@@ -12,26 +10,25 @@ import java.time.Duration;
  * forward by the automatic trusted-IP logins), so an enrolled player re-enters a
  * code at most once per window.</p>
  *
- * <p>This is a deliberate convenience/security trade-off chosen by the server
- * owner; trust is per-player and cleared by {@code /2fa reset} (and by re-issuing
- * a secret with {@code /2fa approve}).</p>
+ * <p>The window length is configurable ({@code trustedIpWindowDays}); this is a
+ * deliberate convenience/security trade-off chosen by the server owner. Trust is
+ * per-player and cleared by {@code /2fa reset} (and by re-issuing a secret with
+ * {@code /2fa approve}).</p>
  */
 public final class TrustedIp {
-
-    /** How long an IP stays trusted after a successful TOTP login. */
-    public static final long WINDOW_MILLIS = Duration.ofDays(7).toMillis();
 
     private TrustedIp() {
     }
 
     /**
      * Whether {@code ip} should be auto-authenticated for {@code record}: it must
-     * match the record's remembered IP and fall inside the trust window.
+     * match the record's remembered IP and fall inside {@code windowMillis} of the
+     * last login. A {@code windowMillis} of 0 disables the grace entirely.
      */
-    public static boolean isValid(UserRecord record, String ip, long now) {
-        if (ip == null || record.trustedIp() == null || record.trustedIpAt() == null) {
+    public static boolean isValid(UserRecord record, String ip, long now, long windowMillis) {
+        if (windowMillis <= 0 || ip == null || record.trustedIp() == null || record.trustedIpAt() == null) {
             return false;
         }
-        return ip.equals(record.trustedIp()) && now - record.trustedIpAt() <= WINDOW_MILLIS;
+        return ip.equals(record.trustedIp()) && now - record.trustedIpAt() <= windowMillis;
     }
 }

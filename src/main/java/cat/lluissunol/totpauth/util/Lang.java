@@ -32,8 +32,8 @@ import java.util.Map;
  */
 public final class Lang {
 
-    /** Fallback language; its table must contain every key used in code. */
-    public static final String FALLBACK = "en_us";
+    /** Last-resort language; its table must contain every key used in code. */
+    private static final String ULTIMATE = "en_us";
 
     /** Bundled language codes (lowercase), in resolution-priority order. */
     private static final String[] BUNDLED = {"en_us", "es_es", "ca_es"};
@@ -44,11 +44,21 @@ public final class Lang {
     /** code -> (key -> template); populated once at startup, read-only thereafter. */
     private static final Map<String, Map<String, String>> TABLES = new LinkedHashMap<>();
 
+    /** Configured default: used for the console and for clients whose language we don't bundle. */
+    private static volatile String defaultLanguage = ULTIMATE;
+
     private Lang() {
     }
 
-    /** Load every bundled table from the classpath. Call once on init. */
-    public static void load(Logger logger) {
+    /** The configured default language (console + unknown-client fallback). */
+    public static String defaultLanguage() {
+        return defaultLanguage;
+    }
+
+    /** Load every bundled table from the classpath and set the default language. Call once on init. */
+    public static void load(Logger logger, String configuredDefault) {
+        defaultLanguage = configuredDefault == null || configuredDefault.isBlank()
+                ? ULTIMATE : configuredDefault.toLowerCase(Locale.ROOT);
         TABLES.clear();
         for (String code : BUNDLED) {
             String path = "/assets/totpauth/lang/" + code + ".json";
@@ -66,35 +76,38 @@ public final class Lang {
                 logger.error("[TotpAuth] Failed to load language file {}", path, e);
             }
         }
-        if (!TABLES.containsKey(FALLBACK)) {
-            logger.error("[TotpAuth] Fallback language {} failed to load - messages will show raw keys.", FALLBACK);
+        if (!TABLES.containsKey(ULTIMATE)) {
+            logger.error("[TotpAuth] Fallback language {} failed to load - messages may show raw keys.", ULTIMATE);
         }
-        logger.info("[TotpAuth] Loaded {} language(s): {}", TABLES.size(), TABLES.keySet());
+        logger.info("[TotpAuth] Loaded {} language(s) {}; default={}", TABLES.size(), TABLES.keySet(), defaultLanguage);
     }
 
-    /** The (lowercased) client language of a player, or the fallback for none. */
+    /** The (lowercased) client language of a player, or the configured default for none. */
     public static String of(ServerPlayer player) {
         if (player == null) {
-            return FALLBACK;
+            return defaultLanguage;
         }
         String language = player.clientInformation().language();
-        return language == null ? FALLBACK : language.toLowerCase(Locale.ROOT);
+        return language == null ? defaultLanguage : language.toLowerCase(Locale.ROOT);
     }
 
-    /** The recipient language for a command source (the player's, or fallback for the console). */
+    /** The recipient language for a command source (the player's, or the default for the console). */
     public static String of(CommandSourceStack source) {
         return of(source.getPlayer());
     }
 
     /**
-     * Resolve {@code key} in {@code language} (falling back to the language family,
-     * then to {@link #FALLBACK}, then to the key itself) and format it with
-     * {@code args} via {@link String#format}.
+     * Resolve {@code key} in {@code language}, falling back to the language family,
+     * then the configured default, then {@code en_us}, then the key itself, and
+     * format it with {@code args} via {@link String#format}.
      */
     public static String get(String language, String key, Object... args) {
         String template = lookup(language, key);
         if (template == null) {
-            template = lookup(FALLBACK, key);
+            template = lookup(defaultLanguage, key);
+        }
+        if (template == null) {
+            template = lookup(ULTIMATE, key);
         }
         if (template == null) {
             return key;

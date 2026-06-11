@@ -1,5 +1,6 @@
 package cat.lluissunol.totpauth;
 
+import cat.lluissunol.totpauth.auth.LoginThrottle;
 import cat.lluissunol.totpauth.auth.SessionManager;
 import cat.lluissunol.totpauth.auth.TrustedIp;
 import cat.lluissunol.totpauth.auth.UserRecord;
@@ -15,6 +16,7 @@ import cat.lluissunol.totpauth.util.Messages;
 import cat.lluissunol.totpauth.util.PlayerIp;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
@@ -28,9 +30,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Server-side TOTP authentication gate.
@@ -51,25 +56,33 @@ public final class TotpAuthMod implements ModInitializer {
     private UserStore store;
     private TotpService totp;
     private Limbo limbo;
+    private TotpConfig config;
+
+    /** Tracks when each unauthenticated player joined, for the kick-timeout. */
+    private final Map<UUID, Long> joinedAt = new ConcurrentHashMap<>();
 
     @Override
     public void onInitialize() {
         sessions = new SessionManager();
         totp = new TotpService();
-        Lang.load(LOGGER);
 
         Path configDir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
+        config = TotpConfig.load(configDir.resolve("config.json"), LOGGER);
+        Lang.load(LOGGER, config.defaultLanguage());
+
         store = new UserStore(configDir.resolve("users.json"), LOGGER);
         store.load();
 
         FrozenPositionStore frozenPositions =
                 new FrozenPositionStore(configDir.resolve("frozen_positions.json"), LOGGER);
         frozenPositions.load();
-        limbo = new Limbo(frozenPositions);
+        limbo = new Limbo(frozenPositions, config.limboHeight());
 
-        registerCommands();
+        LoginThrottle throttle = new LoginThrottle(config.loginAttemptDelayMillis());
+        registerCommands(throttle);
         registerInteractionGuards();
         registerJoinLeave();
+        registerKickTimeout();
 
         LOGGER.info("[TotpAuth] Initialised. User store: {}", configDir.resolve("users.json"));
     }
@@ -78,17 +91,16 @@ public final class TotpAuthMod implements ModInitializer {
         return sessions;
     }
 
-    private void registerCommands() {
-        TotpCommand command = new TotpCommand(store, sessions, totp, limbo);
+    private void registerCommands(LoginThrottle throttle) {
+        TotpCommand command = new TotpCommand(store, sessions, totp, limbo, throttle);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 command.register(dispatcher));
     }
 
     /**
-     * "Fabric API callbacks where cleaner": block interactions for frozen players.
-     * Returning {@link InteractionResult#FAIL} cancels the interaction; {@code PASS}
-     * lets vanilla handle it normally. The packet-handler mixin covers movement,
-     * inventory, chat and commands.
+     * Block interactions for frozen players. Returning {@link InteractionResult#FAIL} cancels
+     * the interaction; {@code PASS} lets vanilla handle it. The packet-handler mixin covers
+     * movement, inventory, chat and commands.
      */
     private void registerInteractionGuards() {
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) ->
@@ -106,6 +118,29 @@ public final class TotpAuthMod implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> onDisconnect(handler.player));
     }
 
+    /** Each server tick, kick any player who has been unauthenticated longer than the configured timeout. */
+    private void registerKickTimeout() {
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (config.unauthenticatedKickSeconds() <= 0) {
+                return;
+            }
+            long deadline = config.unauthenticatedKickSeconds() * 1000L;
+            long now = System.currentTimeMillis();
+            Iterator<Map.Entry<UUID, Long>> it = joinedAt.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<UUID, Long> entry = it.next();
+                if (now - entry.getValue() < deadline) {
+                    continue;
+                }
+                it.remove();
+                ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
+                if (player != null && !sessions.isAuthenticated(player.getUUID())) {
+                    player.connection.disconnect(Messages.warn(Lang.of(player), "totpauth.kick.timeout"));
+                }
+            }
+        });
+    }
+
     private void onJoin(MinecraftServer server, ServerPlayer player) {
         // Carpet (and similar) fake players have no human behind them to ever
         // authenticate, so they bypass the gate completely.
@@ -121,7 +156,8 @@ public final class TotpAuthMod implements ModInitializer {
         // authenticated with (within the trust window) skips the TOTP prompt and
         // is never frozen.
         if (record.isPresent() && record.get().state() == UserState.ENROLLED
-                && TrustedIp.isValid(record.get(), PlayerIp.of(player), System.currentTimeMillis())) {
+                && TrustedIp.isValid(record.get(), PlayerIp.of(player), System.currentTimeMillis(),
+                        config.trustedIpWindowMillis())) {
             sessions.authenticate(player.getUUID());
             player.sendSystemMessage(Messages.good(Lang.of(player), "totpauth.join.trusted_ip"));
             return;
@@ -130,6 +166,7 @@ public final class TotpAuthMod implements ModInitializer {
         // Otherwise every real join starts unauthenticated: freeze and prompt by state.
         sessions.deauthenticate(player.getUUID());
         limbo.send(player);
+        joinedAt.put(player.getUUID(), System.currentTimeMillis());
 
         if (record.isEmpty()) {
             player.sendSystemMessage(Messages.warn(Lang.of(player), "totpauth.join.pending"));
@@ -149,10 +186,11 @@ public final class TotpAuthMod implements ModInitializer {
             limbo.restoreForSave(player);
         }
         sessions.deauthenticate(player.getUUID());
+        joinedAt.remove(player.getUUID());
     }
 
     private void notifyOps(MinecraftServer server, String playerName) {
-        LOGGER.info("[TotpAuth] {}", Lang.get(Lang.FALLBACK, "totpauth.ops.request", playerName, playerName));
+        LOGGER.info("[TotpAuth] {}", Lang.get(Lang.defaultLanguage(), "totpauth.ops.request", playerName, playerName));
         for (ServerPlayer online : server.getPlayerList().getPlayers()) {
             if (server.getPlayerList().isOp(online.nameAndId())) {
                 online.sendSystemMessage(

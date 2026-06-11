@@ -24,12 +24,13 @@ import java.util.UUID;
 public final class Limbo {
 
     /** Height we lift frozen players to; entities live happily above the build limit. */
-    private static final double LIMBO_Y = 500.0;
+    private final double limboY;
 
     private final FrozenPositionStore positions;
 
-    public Limbo(FrozenPositionStore positions) {
+    public Limbo(FrozenPositionStore positions, double limboY) {
         this.positions = positions;
+        this.limboY = limboY;
     }
 
     /** Lift a player into limbo, remembering where they really were. */
@@ -47,7 +48,7 @@ public final class Limbo {
         player.setInvulnerable(true);
         PlayerFreezer.freeze(player);
         // Same dimension, straight up: keep X/Z, raise Y. connection.teleport syncs the client.
-        player.connection.teleport(real.x(), LIMBO_Y, real.z(), real.yaw(), real.pitch());
+        player.connection.teleport(real.x(), limboY, real.z(), real.yaw(), real.pitch());
     }
 
     /** Bring a freshly-authenticated player back to where they belong. */

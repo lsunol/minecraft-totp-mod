@@ -1,6 +1,7 @@
 package cat.lluissunol.totpauth.command;
 
 import cat.lluissunol.totpauth.TotpAuthMod;
+import cat.lluissunol.totpauth.auth.LoginThrottle;
 import cat.lluissunol.totpauth.auth.SessionManager;
 import cat.lluissunol.totpauth.auth.UserRecord;
 import cat.lluissunol.totpauth.auth.UserState;
@@ -15,6 +16,7 @@ import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -45,12 +47,15 @@ public final class TotpCommand {
     private final SessionManager sessions;
     private final TotpService totp;
     private final Limbo limbo;
+    private final LoginThrottle throttle;
 
-    public TotpCommand(UserStore store, SessionManager sessions, TotpService totp, Limbo limbo) {
+    public TotpCommand(UserStore store, SessionManager sessions, TotpService totp, Limbo limbo,
+                       LoginThrottle throttle) {
         this.store = store;
         this.sessions = sessions;
         this.totp = totp;
         this.limbo = limbo;
+        this.throttle = throttle;
     }
 
     public void register(CommandDispatcher<CommandSourceStack> dispatcher) {
@@ -59,7 +64,7 @@ public final class TotpCommand {
                         .then(Commands.argument("code", StringArgumentType.word())
                                 .executes(ctx -> login(ctx, StringArgumentType.getString(ctx, "code")))))
                 .then(Commands.literal("approve")
-                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .requires(Permissions.require("totpauth.command.approve", 2))
                         .then(Commands.argument("player", StringArgumentType.word())
                                 .suggests((ctx, builder) -> {
                                     // Suggest online players who are not yet ENROLLED.
@@ -73,7 +78,7 @@ public final class TotpCommand {
                                 })
                                 .executes(ctx -> approve(ctx, StringArgumentType.getString(ctx, "player")))))
                 .then(Commands.literal("reset")
-                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .requires(Permissions.require("totpauth.command.reset", 2))
                         .then(Commands.argument("player", StringArgumentType.word())
                                 .suggests((ctx, builder) -> {
                                     // Suggest all registered players (ENROLLED + PENDING).
@@ -82,7 +87,7 @@ public final class TotpCommand {
                                 })
                                 .executes(ctx -> reset(ctx, StringArgumentType.getString(ctx, "player")))))
                 .then(Commands.literal("list")
-                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .requires(Permissions.require("totpauth.command.list", 2))
                         .executes(this::list)));
     }
 
@@ -106,13 +111,18 @@ public final class TotpCommand {
             return Command.SINGLE_SUCCESS;
         }
 
+        long now = System.currentTimeMillis();
+        if (throttle.reserve(player.getUUID(), now) > 0) {
+            src.sendFailure(Messages.error(lang, "totpauth.login.too_fast"));
+            return 0;
+        }
+
         UserRecord record = maybe.get();
         if (!totp.verify(record.secret(), code)) {
             src.sendFailure(diagnoseFailure(record, code, name, lang));
             return 0;
         }
 
-        long now = System.currentTimeMillis();
         UserRecord updated = record;
         if (record.state() == UserState.PENDING) {
             updated = updated.withState(UserState.ENROLLED, now);
