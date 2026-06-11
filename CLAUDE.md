@@ -33,7 +33,8 @@ Single-entrypoint server-side Fabric mod (`TotpAuthMod implements ModInitializer
 | `totp` | `TotpService` — wraps `java-otp` + `commons-codec` for HMAC-SHA1 TOTP (RFC 6238) |
 | `command` | `TotpCommand` — registers `/2fa` with sub-commands `login`, `approve`, `reset`, `list` (`approve`/`reset` tab-complete player names) |
 | `mixin` | `ServerGamePacketListenerImplMixin` — packet-boundary freeze for unauthenticated players |
-| `util` | `Limbo` (teleport-to-safety freeze), `PlayerFreezer` (blind/invisible effects), `FakePlayers` (Carpet-bot detection), `PlayerIp` (remote-IP extraction), `AsciiQr` + `QrEncoder` (chat QR), `Messages`, `OfflineUuid` |
+| `util` | `Limbo` (teleport-to-safety freeze), `PlayerFreezer` (blind/invisible effects), `FakePlayers` (Carpet-bot detection), `PlayerIp` (remote-IP extraction), `Lang` (server-side i18n), `AsciiQr` + `QrEncoder` (chat QR), `Messages`, `OfflineUuid` |
+| `resources/assets/totpauth/lang` | Translation tables (`en_us`/`es_es`/`ca_es`.json); add a language by dropping a file and listing it in `Lang.BUNDLED` |
 
 ### Freeze: limbo + two packet/callback layers
 
@@ -49,6 +50,7 @@ Real unauthenticated players are handled in three complementary ways:
 
 ### Key invariants
 
+- **Messages are localized server-side** (`Lang`): vanilla clients have no lang files for our keys, so `Component.translatable` can't be used. The server loads bundled JSON tables and resolves each message in the *recipient's* client language (`ServerPlayer.clientInformation().language()`), sending plain translated text. Falls back exact → language-family (`es_mx`→`es_*`) → `en_us` → raw key. The console uses `en_us`. `en_us` must define every key (verified: 28 keys, all present in every table).
 - **Player names are always lowercased** (`Locale.ROOT`) before storage and lookup.
 - **UUIDs are offline UUIDs** — `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")` — not Mojang account UUIDs.
 - **Session auth is purely in-memory**: `SessionManager` is cleared on disconnect and on every join. Re-auth is required on every join *except* the trusted-IP grace window (below), which is the only thing that can re-populate the session without a code.

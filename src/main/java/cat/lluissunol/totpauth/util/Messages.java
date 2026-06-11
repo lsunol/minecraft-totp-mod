@@ -8,7 +8,12 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 
-/** Small helpers for building consistently-prefixed chat messages. */
+/**
+ * Builds consistently-prefixed, localized chat messages.
+ *
+ * <p>Each builder takes the recipient's language code (see {@link Lang}) plus a
+ * translation key, so the text is resolved in that player's client language.</p>
+ */
 public final class Messages {
 
     public static final String PREFIX = "[TotpAuth] ";
@@ -16,65 +21,70 @@ public final class Messages {
     private Messages() {
     }
 
-    public static Component info(String text) {
-        return Component.literal(PREFIX + text).withStyle(ChatFormatting.GRAY);
+    public static Component info(String lang, String key, Object... args) {
+        return line(ChatFormatting.GRAY, lang, key, args);
     }
 
-    public static Component good(String text) {
-        return Component.literal(PREFIX + text).withStyle(ChatFormatting.GREEN);
+    public static Component good(String lang, String key, Object... args) {
+        return line(ChatFormatting.GREEN, lang, key, args);
     }
 
-    public static Component warn(String text) {
-        return Component.literal(PREFIX + text).withStyle(ChatFormatting.YELLOW);
+    public static Component warn(String lang, String key, Object... args) {
+        return line(ChatFormatting.YELLOW, lang, key, args);
     }
 
-    public static Component error(String text) {
-        return Component.literal(PREFIX + text).withStyle(ChatFormatting.RED);
+    public static Component error(String lang, String key, Object... args) {
+        return line(ChatFormatting.RED, lang, key, args);
+    }
+
+    private static Component line(ChatFormatting color, String lang, String key, Object... args) {
+        return Component.literal(PREFIX + Lang.get(lang, key, args)).withStyle(color);
     }
 
     /**
      * Privately reveal a freshly-issued secret plus setup instructions to the
-     * player: a scannable ASCII QR code, the secret and a setup link (both
-     * click-to-copy), and a click-to-suggest login command.
+     * player, in their client language: a scannable ASCII QR code, the secret and
+     * a setup link (both click-to-copy), and a click-to-suggest login command.
      */
     public static void sendSecret(ServerPlayer player, TotpService totp, String secret) {
+        String lang = Lang.of(player);
         String account = player.nameAndId().name();
         String fullUri = totp.otpauthUri(account, secret);
         String qrUri = totp.compactOtpauthUri(account, secret);
 
-        player.sendSystemMessage(warn("An admin approved your access. Set up two-factor authentication:"));
-        player.sendSystemMessage(info("1. Open Google Authenticator / Authy / FreeOTP."));
-        player.sendSystemMessage(info("2. Scan this QR code (or use the key / link beneath it):"));
-        for (Component line : AsciiQr.render(qrUri)) {
-            player.sendSystemMessage(line);
+        player.sendSystemMessage(warn(lang, "totpauth.secret.intro"));
+        player.sendSystemMessage(info(lang, "totpauth.secret.step1"));
+        player.sendSystemMessage(info(lang, "totpauth.secret.step2"));
+        for (Component qrLine : AsciiQr.render(qrUri)) {
+            player.sendSystemMessage(qrLine);
         }
-        player.sendSystemMessage(Component.literal(PREFIX + "   Secret: ")
+        player.sendSystemMessage(Component.literal(PREFIX + "   " + Lang.get(lang, "totpauth.secret.label_secret"))
                 .withStyle(ChatFormatting.GRAY)
-                .append(copyable(totp.formatForDisplay(secret), secret,
+                .append(copyable(totp.formatForDisplay(secret), secret, lang,
                         ChatFormatting.AQUA, ChatFormatting.BOLD)));
-        player.sendSystemMessage(Component.literal(PREFIX + "   Setup link: ")
+        player.sendSystemMessage(Component.literal(PREFIX + "   " + Lang.get(lang, "totpauth.secret.label_link"))
                 .withStyle(ChatFormatting.GRAY)
-                .append(copyable("[click to copy]", fullUri,
+                .append(copyable(Lang.get(lang, "totpauth.secret.link_click"), fullUri, lang,
                         ChatFormatting.DARK_AQUA, ChatFormatting.UNDERLINE)));
-        player.sendSystemMessage(Component.literal(PREFIX + "3. Then run ")
+        player.sendSystemMessage(Component.literal(PREFIX + Lang.get(lang, "totpauth.secret.step3"))
                 .withStyle(ChatFormatting.GREEN)
-                .append(suggest("/2fa login <code>", "/2fa login ")));
+                .append(suggest(Lang.get(lang, "totpauth.secret.login_label"), "/2fa login ", lang)));
     }
 
     /** A label that copies {@code clipboard} to the system clipboard when clicked. */
-    private static MutableComponent copyable(String label, String clipboard, ChatFormatting... formats) {
+    private static MutableComponent copyable(String label, String clipboard, String lang, ChatFormatting... formats) {
         return Component.literal(label).withStyle(style -> style
                 .applyFormats(formats)
                 .withClickEvent(new ClickEvent.CopyToClipboard(clipboard))
-                .withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy"))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(Lang.get(lang, "totpauth.hover.copy")))));
     }
 
     /** A label that pre-fills the chat box with {@code command} when clicked. */
-    private static MutableComponent suggest(String label, String command) {
+    private static MutableComponent suggest(String label, String command, String lang) {
         return Component.literal(label).withStyle(style -> style
                 .applyFormat(ChatFormatting.GREEN)
                 .withUnderlined(true)
                 .withClickEvent(new ClickEvent.SuggestCommand(command))
-                .withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to put this in your chat box"))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(Lang.get(lang, "totpauth.hover.suggest")))));
     }
 }

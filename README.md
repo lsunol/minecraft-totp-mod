@@ -255,6 +255,27 @@ leaving a hole in the freeze.
 
 ---
 
+## Languages
+
+All player-facing messages are shown in **each player's own Minecraft language**.
+The mod is server-side only and players use vanilla clients, so it can't ship
+client lang files; instead the server keeps the translation tables and reads each
+player's selected language (`Options → Language`) to pick the text — so two players
+on the same server can see prompts in different languages at the same time.
+
+Bundled out of the box: **English** (`en_us`, the fallback), **Spanish** (`es_es`)
+and **Catalan** (`ca_es`). Unknown languages fall back to the closest family
+(e.g. `es_mx` → Spanish) and finally to English. The server console logs in English.
+
+Adding a language is trivial and needs no code changes beyond one line:
+
+1. Copy `src/main/resources/assets/totpauth/lang/en_us.json` to e.g. `fr_fr.json`
+   and translate the values (keep the `%s` placeholders in place).
+2. Add `"fr_fr"` to the `BUNDLED` list in `util/Lang.java`.
+3. Rebuild. `en_us` must contain every key (it is the fallback).
+
+---
+
 ## Troubleshooting
 
 ### Every code is rejected ("Invalid code")

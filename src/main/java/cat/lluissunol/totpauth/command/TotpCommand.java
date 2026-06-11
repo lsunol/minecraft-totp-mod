@@ -6,6 +6,7 @@ import cat.lluissunol.totpauth.auth.UserRecord;
 import cat.lluissunol.totpauth.auth.UserState;
 import cat.lluissunol.totpauth.storage.UserStore;
 import cat.lluissunol.totpauth.totp.TotpService;
+import cat.lluissunol.totpauth.util.Lang;
 import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
 import cat.lluissunol.totpauth.util.OfflineUuid;
@@ -89,24 +90,25 @@ public final class TotpCommand {
         CommandSourceStack src = ctx.getSource();
         ServerPlayer player = src.getPlayer();
         if (player == null) {
-            src.sendFailure(Messages.error("Only in-game players can authenticate."));
+            src.sendFailure(Messages.error(Lang.of(src), "totpauth.login.players_only"));
             return 0;
         }
+        String lang = Lang.of(player);
 
         String name = player.nameAndId().name().toLowerCase(Locale.ROOT);
         Optional<UserRecord> maybe = store.get(name);
         if (maybe.isEmpty()) {
-            src.sendFailure(Messages.error("You are not registered yet. Ask an admin to approve you first."));
+            src.sendFailure(Messages.error(lang, "totpauth.login.not_registered"));
             return 0;
         }
         if (sessions.isAuthenticated(player.getUUID())) {
-            src.sendSuccess(() -> Messages.info("You are already authenticated this session."), false);
+            src.sendSuccess(() -> Messages.info(lang, "totpauth.login.already_auth"), false);
             return Command.SINGLE_SUCCESS;
         }
 
         UserRecord record = maybe.get();
         if (!totp.verify(record.secret(), code)) {
-            src.sendFailure(diagnoseFailure(record, code, name));
+            src.sendFailure(diagnoseFailure(record, code, name, lang));
             return 0;
         }
 
@@ -114,9 +116,9 @@ public final class TotpCommand {
         UserRecord updated = record;
         if (record.state() == UserState.PENDING) {
             updated = updated.withState(UserState.ENROLLED, now);
-            player.sendSystemMessage(Messages.good("Enrollment confirmed - you're in. Welcome!"));
+            player.sendSystemMessage(Messages.good(lang, "totpauth.login.enrolled"));
         } else {
-            player.sendSystemMessage(Messages.good("Authenticated. Welcome back!"));
+            player.sendSystemMessage(Messages.good(lang, "totpauth.login.welcome_back"));
         }
         // Remember this IP so rejoining from it skips the prompt for the trust window.
         String ip = PlayerIp.of(player);
@@ -137,21 +139,18 @@ public final class TotpCommand {
      * cause of "every code is rejected"); a code that matches nowhere means the
      * authenticator holds a different secret than the server.
      */
-    private Component diagnoseFailure(UserRecord record, String code, String name) {
+    private Component diagnoseFailure(UserRecord record, String code, String name, String lang) {
         Integer offset = totp.diagnoseOffsetSteps(record.secret(), code);
         if (offset == null) {
             TotpAuthMod.LOGGER.warn("[TotpAuth] Rejected code for {}: no match within +/-30 min - "
                     + "the authenticator secret differs from the stored one.", name);
-            return Messages.error("Invalid code, and it doesn't match this server's secret at all. "
-                    + "Remove this entry from your app and re-add it from the key shown by /2fa "
-                    + "(copy the Secret rather than scanning).");
+            return Messages.error(lang, "totpauth.login.bad_code_secret");
         }
         long secs = Math.abs((long) offset) * totp.stepSeconds();
         String dir = offset > 0 ? "behind" : "ahead of";
         TotpAuthMod.LOGGER.warn("[TotpAuth] Rejected code for {}: only matches with a ~{}s skew "
                 + "(server clock is {} the authenticator). Sync the server clock via NTP.", name, secs, dir);
-        return Messages.error("Invalid code: the server clock is out of sync by ~" + secs
-                + "s. Ask the admin to sync the server time (NTP) - TOTP needs it within ~30s.");
+        return Messages.error(lang, "totpauth.login.bad_code_clock", secs);
     }
 
     private int approve(CommandContext<CommandSourceStack> ctx, String rawName) {
@@ -159,10 +158,10 @@ public final class TotpCommand {
         MinecraftServer server = src.getServer();
         String name = rawName.toLowerCase(Locale.ROOT);
 
+        String lang = Lang.of(src);
         Optional<UserRecord> existing = store.get(name);
         if (existing.isPresent() && existing.get().state() == UserState.ENROLLED) {
-            src.sendFailure(Messages.error(rawName + " is already enrolled. Run /2fa reset "
-                    + rawName + " first if you want to re-issue a secret."));
+            src.sendFailure(Messages.error(lang, "totpauth.approve.already_enrolled", rawName, rawName));
             return 0;
         }
 
@@ -173,11 +172,9 @@ public final class TotpCommand {
         ServerPlayer online = server.getPlayerList().getPlayerByName(rawName);
         if (online != null) {
             Messages.sendSecret(online, totp, secret);
-            src.sendSuccess(() -> Messages.good("Approved " + rawName
-                    + ". Their secret was sent to them privately."), true);
+            src.sendSuccess(() -> Messages.good(lang, "totpauth.approve.sent", rawName), true);
         } else {
-            src.sendSuccess(() -> Messages.good("Approved " + rawName
-                    + ". Their secret will be shown the next time they join."), true);
+            src.sendSuccess(() -> Messages.good(lang, "totpauth.approve.on_join", rawName), true);
         }
         return Command.SINGLE_SUCCESS;
     }
@@ -186,8 +183,9 @@ public final class TotpCommand {
         CommandSourceStack src = ctx.getSource();
         MinecraftServer server = src.getServer();
 
+        String lang = Lang.of(src);
         if (!store.remove(rawName)) {
-            src.sendFailure(Messages.error("No record found for " + rawName + "."));
+            src.sendFailure(Messages.error(lang, "totpauth.reset.not_found", rawName));
             return 0;
         }
 
@@ -195,10 +193,9 @@ public final class TotpCommand {
         if (online != null) {
             sessions.deauthenticate(online.getUUID());
             limbo.send(online);
-            online.sendSystemMessage(Messages.warn(
-                    "Your 2FA registration was reset by an admin. You'll need to be approved again."));
+            online.sendSystemMessage(Messages.warn(Lang.of(online), "totpauth.reset.player_notice"));
         }
-        src.sendSuccess(() -> Messages.good("Reset " + rawName + " - they are now unregistered."), true);
+        src.sendSuccess(() -> Messages.good(lang, "totpauth.reset.done", rawName), true);
         return Command.SINGLE_SUCCESS;
     }
 
@@ -217,10 +214,12 @@ public final class TotpCommand {
         enrolled.sort(String::compareTo);
         pending.sort(String::compareTo);
 
-        src.sendSuccess(() -> Messages.good("Enrolled (" + enrolled.size() + "): "
-                + (enrolled.isEmpty() ? "(none)" : String.join(", ", enrolled))), false);
-        src.sendSuccess(() -> Messages.warn("Pending (" + pending.size() + "): "
-                + (pending.isEmpty() ? "(none)" : String.join(", ", pending))), false);
+        String lang = Lang.of(src);
+        String none = Lang.get(lang, "totpauth.list.none");
+        String enrolledNames = enrolled.isEmpty() ? none : String.join(", ", enrolled);
+        String pendingNames = pending.isEmpty() ? none : String.join(", ", pending);
+        src.sendSuccess(() -> Messages.good(lang, "totpauth.list.enrolled", enrolled.size(), enrolledNames), false);
+        src.sendSuccess(() -> Messages.warn(lang, "totpauth.list.pending", pending.size(), pendingNames), false);
         return Command.SINGLE_SUCCESS;
     }
 }

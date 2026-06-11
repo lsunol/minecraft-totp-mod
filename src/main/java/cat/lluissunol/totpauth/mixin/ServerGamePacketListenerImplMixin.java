@@ -2,6 +2,7 @@ package cat.lluissunol.totpauth.mixin;
 
 import cat.lluissunol.totpauth.TotpAuthMod;
 import cat.lluissunol.totpauth.auth.SessionManager;
+import cat.lluissunol.totpauth.util.Lang;
 import cat.lluissunol.totpauth.util.Messages;
 import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundChatPacket;
@@ -93,7 +94,7 @@ public abstract class ServerGamePacketListenerImplMixin {
     @Inject(method = "handleChat", at = @At("HEAD"), cancellable = true)
     private void totpauth$onChat(ServerboundChatPacket packet, CallbackInfo ci) {
         if (totpauth$frozen()) {
-            this.player.sendSystemMessage(Messages.warn("Authenticate before chatting: /2fa login <code>."));
+            this.player.sendSystemMessage(Messages.warn(Lang.of(this.player), "totpauth.freeze.chat"));
             ci.cancel();
         }
     }
@@ -101,7 +102,7 @@ public abstract class ServerGamePacketListenerImplMixin {
     @Inject(method = "handleChatCommand", at = @At("HEAD"), cancellable = true)
     private void totpauth$onChatCommand(ServerboundChatCommandPacket packet, CallbackInfo ci) {
         if (totpauth$frozen() && !totpauth$isLoginCommand(packet.command())) {
-            this.player.sendSystemMessage(Messages.warn("Authenticate first: /2fa login <code>."));
+            this.player.sendSystemMessage(Messages.warn(Lang.of(this.player), "totpauth.freeze.command"));
             ci.cancel();
         }
     }

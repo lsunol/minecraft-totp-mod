@@ -9,6 +9,7 @@ import cat.lluissunol.totpauth.storage.FrozenPositionStore;
 import cat.lluissunol.totpauth.storage.UserStore;
 import cat.lluissunol.totpauth.totp.TotpService;
 import cat.lluissunol.totpauth.util.FakePlayers;
+import cat.lluissunol.totpauth.util.Lang;
 import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
 import cat.lluissunol.totpauth.util.PlayerIp;
@@ -55,6 +56,7 @@ public final class TotpAuthMod implements ModInitializer {
     public void onInitialize() {
         sessions = new SessionManager();
         totp = new TotpService();
+        Lang.load(LOGGER);
 
         Path configDir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
         store = new UserStore(configDir.resolve("users.json"), LOGGER);
@@ -121,8 +123,7 @@ public final class TotpAuthMod implements ModInitializer {
         if (record.isPresent() && record.get().state() == UserState.ENROLLED
                 && TrustedIp.isValid(record.get(), PlayerIp.of(player), System.currentTimeMillis())) {
             sessions.authenticate(player.getUUID());
-            player.sendSystemMessage(Messages.good(
-                    "Welcome back - authenticated automatically from your trusted IP."));
+            player.sendSystemMessage(Messages.good(Lang.of(player), "totpauth.join.trusted_ip"));
             return;
         }
 
@@ -131,14 +132,12 @@ public final class TotpAuthMod implements ModInitializer {
         limbo.send(player);
 
         if (record.isEmpty()) {
-            player.sendSystemMessage(Messages.warn(
-                    "Access is restricted - you are pending admin approval. Please wait."));
+            player.sendSystemMessage(Messages.warn(Lang.of(player), "totpauth.join.pending"));
             notifyOps(server, player.nameAndId().name());
         } else if (record.get().state() == UserState.PENDING) {
             Messages.sendSecret(player, totp, record.get().secret());
         } else {
-            player.sendSystemMessage(Messages.warn(
-                    "This server requires 2FA. Authenticate with /2fa login <code>."));
+            player.sendSystemMessage(Messages.warn(Lang.of(player), "totpauth.join.need_2fa"));
         }
     }
 
@@ -153,11 +152,11 @@ public final class TotpAuthMod implements ModInitializer {
     }
 
     private void notifyOps(MinecraftServer server, String playerName) {
-        String request = "Player " + playerName + " requests access. Use /2fa approve " + playerName;
-        LOGGER.info("[TotpAuth] {}", request);
+        LOGGER.info("[TotpAuth] {}", Lang.get(Lang.FALLBACK, "totpauth.ops.request", playerName, playerName));
         for (ServerPlayer online : server.getPlayerList().getPlayers()) {
             if (server.getPlayerList().isOp(online.nameAndId())) {
-                online.sendSystemMessage(Messages.warn(request));
+                online.sendSystemMessage(
+                        Messages.warn(Lang.of(online), "totpauth.ops.request", playerName, playerName));
             }
         }
     }
