@@ -1,5 +1,6 @@
 package cat.lluissunol.totpauth.command;
 
+import cat.lluissunol.totpauth.TotpAuthMod;
 import cat.lluissunol.totpauth.auth.SessionManager;
 import cat.lluissunol.totpauth.auth.UserRecord;
 import cat.lluissunol.totpauth.auth.UserState;
@@ -15,6 +16,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -104,7 +106,7 @@ public final class TotpCommand {
 
         UserRecord record = maybe.get();
         if (!totp.verify(record.secret(), code)) {
-            src.sendFailure(Messages.error("Invalid code. Check your authenticator app and try again."));
+            src.sendFailure(diagnoseFailure(record, code, name));
             return 0;
         }
 
@@ -127,6 +129,29 @@ public final class TotpCommand {
         sessions.authenticate(player.getUUID());
         limbo.release(player);
         return Command.SINGLE_SUCCESS;
+    }
+
+    /**
+     * Turn a rejected code into an actionable message. A code that only matches
+     * with a large time skew means the server clock is out of sync (the usual
+     * cause of "every code is rejected"); a code that matches nowhere means the
+     * authenticator holds a different secret than the server.
+     */
+    private Component diagnoseFailure(UserRecord record, String code, String name) {
+        Integer offset = totp.diagnoseOffsetSteps(record.secret(), code);
+        if (offset == null) {
+            TotpAuthMod.LOGGER.warn("[TotpAuth] Rejected code for {}: no match within +/-30 min - "
+                    + "the authenticator secret differs from the stored one.", name);
+            return Messages.error("Invalid code, and it doesn't match this server's secret at all. "
+                    + "Remove this entry from your app and re-add it from the key shown by /2fa "
+                    + "(copy the Secret rather than scanning).");
+        }
+        long secs = Math.abs((long) offset) * totp.stepSeconds();
+        String dir = offset > 0 ? "behind" : "ahead of";
+        TotpAuthMod.LOGGER.warn("[TotpAuth] Rejected code for {}: only matches with a ~{}s skew "
+                + "(server clock is {} the authenticator). Sync the server clock via NTP.", name, secs, dir);
+        return Messages.error("Invalid code: the server clock is out of sync by ~" + secs
+                + "s. Ask the admin to sync the server time (NTP) - TOTP needs it within ~30s.");
     }
 
     private int approve(CommandContext<CommandSourceStack> ctx, String rawName) {

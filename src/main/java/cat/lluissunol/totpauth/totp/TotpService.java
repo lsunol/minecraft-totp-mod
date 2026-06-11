@@ -29,6 +29,10 @@ public final class TotpService {
     private static final Duration STEP = Duration.ofSeconds(30);
     /** RFC 4226 recommends a 160-bit key for HMAC-SHA1. */
     private static final int SECRET_BYTES = 20;
+    /** How many steps each side we accept (±1 step ≈ ±30s of clock drift). */
+    private static final int ACCEPT_STEPS = 1;
+    /** How wide we probe ONLY to diagnose a failure (±60 steps = ±30 min). */
+    private static final int DIAGNOSE_STEPS = 60;
 
     private final TimeBasedOneTimePasswordGenerator totp;
     private final SecureRandom random = new SecureRandom();
@@ -61,34 +65,70 @@ public final class TotpService {
      * @return {@code true} only if the code matches; malformed input yields {@code false}.
      */
     public boolean verify(String base32Secret, String submittedCode) {
+        Integer offset = matchOffsetSteps(base32Secret, submittedCode, ACCEPT_STEPS);
+        return offset != null;
+    }
+
+    /**
+     * Diagnose a code that failed {@link #verify}: probe a wide window (±30 min)
+     * and report the step offset at which the code <em>would</em> match. A non-zero
+     * result means the server clock is out of sync with the authenticator app:
+     *
+     * <ul>
+     *   <li>positive = the server clock is <b>behind</b> real time (app is ahead)</li>
+     *   <li>negative = the server clock is <b>ahead</b> of real time</li>
+     *   <li>{@code null} = no match anywhere in the window, so the secret in the app
+     *       differs from the stored one (wrong/old entry), not a clock problem</li>
+     * </ul>
+     *
+     * @return signed step offset, or {@code null} if the code matches nowhere
+     */
+    public Integer diagnoseOffsetSteps(String base32Secret, String submittedCode) {
+        return matchOffsetSteps(base32Secret, submittedCode, DIAGNOSE_STEPS);
+    }
+
+    /** Seconds represented by one step offset, for turning a diagnose result into a duration. */
+    public long stepSeconds() {
+        return STEP.toSeconds();
+    }
+
+    /**
+     * Search {@code ±maxSteps} around now for a step whose code equals the submission.
+     *
+     * @return the signed offset of the first match (0 preferred), or {@code null} if none.
+     */
+    private Integer matchOffsetSteps(String base32Secret, String submittedCode, int maxSteps) {
         Integer submitted = parseCode(submittedCode);
         if (submitted == null || base32Secret == null) {
-            return false;
+            return null;
         }
 
         final Key key;
         try {
             byte[] keyBytes = base32.decode(normalize(base32Secret));
             if (keyBytes.length == 0) {
-                return false;
+                return null;
             }
             key = new SecretKeySpec(keyBytes, HMAC_ALGORITHM);
         } catch (RuntimeException e) {
-            return false;
+            return null;
         }
 
         Instant now = clock.instant();
         try {
-            for (int step = -1; step <= 1; step++) {
-                Instant timestamp = now.plus(STEP.multipliedBy(step));
-                if (totp.generateOneTimePassword(key, timestamp) == submitted) {
-                    return true;
+            // Widen outward from 0 so the smallest skew wins (and 0 is checked first).
+            for (int distance = 0; distance <= maxSteps; distance++) {
+                for (int step : distance == 0 ? new int[]{0} : new int[]{distance, -distance}) {
+                    Instant timestamp = now.plus(STEP.multipliedBy(step));
+                    if (totp.generateOneTimePassword(key, timestamp) == submitted) {
+                        return step;
+                    }
                 }
             }
         } catch (InvalidKeyException e) {
-            return false;
+            return null;
         }
-        return false;
+        return null;
     }
 
     /** otpauth:// URI suitable for pasting into an authenticator app or rendering as a QR code. */
