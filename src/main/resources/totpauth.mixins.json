@@ -4,7 +4,8 @@
 	"package": "cat.lluissunol.totpauth.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"ServerGamePacketListenerImplMixin"
+		"ServerGamePacketListenerImplMixin",
+		"ServerLoginPacketListenerImplMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

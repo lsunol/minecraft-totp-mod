@@ -83,8 +83,26 @@ On first start the mod logs:
 
 ## Configuration / data
 
-There is no hand-edited config file. State lives in a JSON store that is created
-automatically and survives Docker/Crafty restarts:
+Settings live in an editable JSON file, created with defaults on first start and
+rewritten on every load to fill in any newly-added keys:
+
+```
+<server>/config/totpauth/config.json
+```
+
+| Key | Default | Effect |
+|---|---|---|
+| `defaultLanguage` | `"ca_es"` | Language for the console and for clients whose language isn't bundled. |
+| `trustedIpWindowDays` | `7` | Days an IP stays trusted after a successful `/2fa login` (`0` disables it). |
+| `loginAttemptDelayMillis` | `1000` | Minimum delay between two `/2fa login` attempts by the same player. |
+| `unauthenticatedKickSeconds` | `60` | Kick a still-unauthenticated player after this many seconds (`0` disables the kick). |
+| `limboHeight` | `500.0` | Y coordinate frozen players are lifted to while in limbo. |
+| `premiumAutoLoginEnabled` | `false` | Skip TOTP for players whose connection passes real Mojang/Microsoft verification — see *Premium auto-login* below. |
+
+Restart the server after editing `config.json` for changes to take effect.
+
+State lives in a separate JSON store that is also created automatically and
+survives Docker/Crafty restarts:
 
 ```
 <server>/config/totpauth/users.json
@@ -171,6 +189,33 @@ they are never frozen and see *"authenticated automatically from your trusted IP
 > NAT/household, the same VPN exit, ISP CGNAT) within the window could join as the
 > player without a code. The trust is per-player and IP-exact. If you don't want it,
 > set the window to `0` (`TrustedIp.WINDOW_MILLIS`).
+
+### Premium auto-login
+
+Set `premiumAutoLoginEnabled: true` in `config.json` to let players who own a
+**real Mojang/Microsoft account** skip TOTP entirely: their account is already
+protected by Mojang's own login, so a second factor is redundant for them.
+
+This is **not** a name check. When a connecting client's claimed username matches
+a real Mojang account, the mod redirects that one connection through vanilla's
+own online-mode handshake (RSA/AES key exchange + a real session-server check
+against Mojang) — the same code path a server running `online-mode=true` uses —
+instead of the server's normal offline path. Every other connection (any name
+that isn't a real Mojang account) is completely unaffected and goes through the
+usual offline + TOTP flow.
+
+- Only the genuine account owner can complete that handshake. A cracked client
+  that merely *picks* a username matching someone else's premium account **does
+  not** fall back to TOTP — it is hard-disconnected ("Failed to verify
+  username!"), exactly like a normal online-mode server would reject it. This is
+  intentional: it stops anyone from registering a TOTP account under a name that
+  belongs to a real Mojang account.
+- Requires `online-mode=false` in `server.properties` (the server still needs to
+  accept cracked players for everyone else); the redirect only flips the check
+  for individual connections that pass the premium-username lookup.
+- The username→account lookup is a short-timeout (~2s), briefly-cached
+  (~10 min) call to Mojang's public profile API, used only to decide whether to
+  challenge a connection — never as proof of identity by itself.
 
 ### Commands
 

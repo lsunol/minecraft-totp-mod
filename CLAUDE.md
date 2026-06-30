@@ -22,7 +22,7 @@ There are no tests in this project. Build success is the only automated verifica
 
 ## Architecture
 
-Single-entrypoint server-side Fabric mod (`TotpAuthMod implements ModInitializer`). No client split, no hand-edited config — state lives in `<server>/config/totpauth/` (`users.json`, plus a transient `frozen_positions.json` safety net for the limbo teleport).
+Single-entrypoint server-side Fabric mod (`TotpAuthMod implements ModInitializer`). No client split — state lives in `<server>/config/totpauth/` (`config.json` for settings, `users.json` for player records, plus a transient `frozen_positions.json` safety net for the limbo teleport).
 
 ### Package layout
 
@@ -32,8 +32,8 @@ Single-entrypoint server-side Fabric mod (`TotpAuthMod implements ModInitializer
 | `storage` | `UserStore` (users), `FrozenPositionStore` (limbo positions) — Gson-backed JSON, atomic write, POSIX-only `chmod 600` |
 | `totp` | `TotpService` — wraps `java-otp` + `commons-codec` for HMAC-SHA1 TOTP (RFC 6238) |
 | `command` | `TotpCommand` — registers `/2fa` with sub-commands `login`, `approve`, `reset`, `list` (`approve`/`reset` tab-complete player names) |
-| `mixin` | `ServerGamePacketListenerImplMixin` — packet-boundary freeze for unauthenticated players |
-| `util` | `Limbo` (teleport-to-safety freeze), `PlayerFreezer` (blind/invisible effects), `FakePlayers` (Carpet-bot detection), `PlayerIp` (remote-IP extraction), `Lang` (server-side i18n), `AsciiQr` + `QrEncoder` (chat QR), `Messages`, `OfflineUuid` |
+| `mixin` | `ServerGamePacketListenerImplMixin` — packet-boundary freeze for unauthenticated players; `ServerLoginPacketListenerImplMixin` — redirects `usesAuthentication()` to enable real Mojang verification for premium-named connections |
+| `util` | `Limbo` (teleport-to-safety freeze), `PlayerFreezer` (blind/invisible effects), `FakePlayers` (Carpet-bot detection), `PlayerIp` (remote-IP extraction), `Lang` (server-side i18n), `AsciiQr` + `QrEncoder` (chat QR), `Messages`, `OfflineUuid`, `MojangAccounts` (cached Mojang username→account lookup) |
 | `resources/assets/totpauth/lang` | Translation tables (`en_us`/`es_es`/`ca_es`.json); add a language by dropping a file and listing it in `Lang.BUNDLED` |
 
 ### Freeze: limbo + two packet/callback layers
@@ -50,7 +50,7 @@ Real unauthenticated players are handled in three complementary ways:
 
 ### Key invariants
 
-- **Messages are localized server-side** (`Lang`): vanilla clients have no lang files for our keys, so `Component.translatable` can't be used. The server loads bundled JSON tables and resolves each message in the *recipient's* client language (`ServerPlayer.clientInformation().language()`), sending plain translated text. Falls back exact → language-family (`es_mx`→`es_*`) → `en_us` → raw key. The console uses `en_us`. `en_us` must define every key (verified: 28 keys, all present in every table).
+- **Messages are localized server-side** (`Lang`): vanilla clients have no lang files for our keys, so `Component.translatable` can't be used. The server loads bundled JSON tables and resolves each message in the *recipient's* client language (`ServerPlayer.clientInformation().language()`), sending plain translated text. Falls back exact → language-family (`es_mx`→`es_*`) → `en_us` → raw key. The console uses `en_us`. `en_us` must define every key (verified: 29 keys, all present in every table).
 - **Player names are always lowercased** (`Locale.ROOT`) before storage and lookup.
 - **UUIDs are offline UUIDs** — `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")` — not Mojang account UUIDs.
 - **Session auth is purely in-memory**: `SessionManager` is cleared on disconnect and on every join. Re-auth is required on every join *except* the trusted-IP grace window (below), which is the only thing that can re-populate the session without a code.
@@ -59,6 +59,7 @@ Real unauthenticated players are handled in three complementary ways:
 - **Gson is not bundled** — it is assumed present on the Minecraft server classpath. `java-otp`, `commons-codec` and `com.google.zxing:core` are Jar-in-Jar'd.
 - **Fake players (Carpet bots) are never gated** — detected by class name and auto-authenticated on join, so all three freeze layers treat them as logged in.
 - **The limbo teleport must round-trip the real position** — captured on freeze, restored on login and on disconnect. On a crash-recovery join `FrozenPositionStore.get` is authoritative over the player's (limbo) live position, so the capture is skipped when an entry already exists.
+- **Premium auto-login** (`TotpConfig.premiumAutoLoginEnabled`, default `false`): `ServerLoginPacketListenerImplMixin` `@Redirect`s the single `MinecraftServer.usesAuthentication()` call inside `handleHello` so it also returns `true`, per-connection, when the claimed username resolves to a real Mojang account (`MojangAccounts.exists`, a short-timeout/cached lookup against Mojang's public profile API). This makes vanilla's own unmodified RSA/AES handshake + session-server check run for that connection — no crypto is reimplemented. `TotpAuthMod.onJoin` detects a successfully-verified connection by comparing `player.getUUID()` against `OfflineUuid.of(rawName)` (the *raw*, non-lowercased name — the offline-UUID formula is case-sensitive): a mismatch means the connection went through real verification, so the player is auto-authenticated and skips TOTP entirely. A claimed-but-unverified premium username is **hard-disconnected** by vanilla itself ("Failed to verify username!"), not gracefully downgraded to TOTP — this is intentional, otherwise anyone could register a TOTP account under a real Mojang account's name.
 
 ### Known TODOs in the code
 

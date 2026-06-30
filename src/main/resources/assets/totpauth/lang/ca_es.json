@@ -17,6 +17,7 @@
   "totpauth.list.pending": "Pendents (%s): %s",
   "totpauth.list.none": "(cap)",
   "totpauth.join.trusted_ip": "Benvingut de nou: autenticat automàticament des de la teva IP de confiança.",
+  "totpauth.join.premium": "Benvingut: el teu compte de Minecraft ha estat verificat, així que no cal codi 2FA.",
   "totpauth.join.pending": "Accés restringit: estàs pendent d'aprovació d'un administrador. Espera, si us plau.",
   "totpauth.join.need_2fa": "Aquest servidor requereix 2FA. Autentica't amb /2fa login <codi>.",
   "totpauth.ops.request": "El jugador %s demana accés. Usa /2fa approve %s",

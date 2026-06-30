@@ -41,6 +41,14 @@ public final class TotpConfig {
     /** Height (Y) frozen players are lifted to while in limbo. */
     private double limboHeight = 500.0;
 
+    /**
+     * Let players whose connection completes real Mojang/Microsoft verification skip TOTP
+     * entirely - their account is already protected by Mojang, so a second factor is
+     * redundant. Requires {@code online-mode=false} in server.properties (cracked players
+     * still need TOTP); see {@code ServerLoginPacketListenerImplMixin}.
+     */
+    private boolean premiumAutoLoginEnabled = false;
+
     public static TotpConfig load(Path file, Logger logger) {
         TotpConfig config = new TotpConfig();
         if (Files.exists(file)) {
@@ -54,9 +62,10 @@ public final class TotpConfig {
             }
         }
         config.save(file, logger);
-        logger.info("[TotpAuth] Config: language={}, trustedIpDays={}, loginDelayMs={}, kickSeconds={}, limboY={}",
+        logger.info("[TotpAuth] Config: language={}, trustedIpDays={}, loginDelayMs={}, kickSeconds={}, limboY={}, "
+                        + "premiumAutoLogin={}",
                 config.defaultLanguage(), config.trustedIpWindowDays, config.loginAttemptDelayMillis(),
-                config.unauthenticatedKickSeconds(), config.limboHeight);
+                config.unauthenticatedKickSeconds(), config.limboHeight, config.premiumAutoLoginEnabled());
         return config;
     }
 
@@ -96,5 +105,9 @@ public final class TotpConfig {
 
     public double limboHeight() {
         return limboHeight;
+    }
+
+    public boolean premiumAutoLoginEnabled() {
+        return premiumAutoLoginEnabled;
     }
 }

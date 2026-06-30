@@ -17,6 +17,7 @@
   "totpauth.list.pending": "Pending (%s): %s",
   "totpauth.list.none": "(none)",
   "totpauth.join.trusted_ip": "Welcome back - authenticated automatically from your trusted IP.",
+  "totpauth.join.premium": "Welcome - your Minecraft account was verified, so no 2FA code is needed.",
   "totpauth.join.pending": "Access is restricted - you are pending admin approval. Please wait.",
   "totpauth.join.need_2fa": "This server requires 2FA. Authenticate with /2fa login <code>.",
   "totpauth.ops.request": "Player %s requests access. Use /2fa approve %s",

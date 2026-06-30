@@ -13,6 +13,7 @@ import cat.lluissunol.totpauth.util.FakePlayers;
 import cat.lluissunol.totpauth.util.Lang;
 import cat.lluissunol.totpauth.util.Limbo;
 import cat.lluissunol.totpauth.util.Messages;
+import cat.lluissunol.totpauth.util.OfflineUuid;
 import cat.lluissunol.totpauth.util.PlayerIp;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -50,13 +51,13 @@ public final class TotpAuthMod implements ModInitializer {
     public static final String MOD_ID = "totpauth";
     public static final Logger LOGGER = LoggerFactory.getLogger("TotpAuth");
 
-    /** Held statically so the packet-handler mixin can query session state. */
+    /** Held statically so the packet-handler mixins can query session state and config. */
     private static SessionManager sessions;
+    private static TotpConfig config;
 
     private UserStore store;
     private TotpService totp;
     private Limbo limbo;
-    private TotpConfig config;
 
     /** Tracks when each unauthenticated player joined, for the kick-timeout. */
     private final Map<UUID, Long> joinedAt = new ConcurrentHashMap<>();
@@ -89,6 +90,10 @@ public final class TotpAuthMod implements ModInitializer {
 
     public static SessionManager sessions() {
         return sessions;
+    }
+
+    public static TotpConfig config() {
+        return config;
     }
 
     private void registerCommands(LoginThrottle throttle) {
@@ -149,7 +154,19 @@ public final class TotpAuthMod implements ModInitializer {
             return;
         }
 
-        String name = player.nameAndId().name().toLowerCase(Locale.ROOT);
+        String rawName = player.nameAndId().name();
+        String name = rawName.toLowerCase(Locale.ROOT);
+
+        // Premium auto-login: ServerLoginPacketListenerImplMixin redirects this connection
+        // through real Mojang verification when the claimed username matches a real account,
+        // so a genuine online UUID here (rather than the offline-formula one) proves the
+        // player just passed that handshake - no TOTP needed.
+        if (config.premiumAutoLoginEnabled() && !player.getUUID().equals(OfflineUuid.of(rawName))) {
+            sessions.authenticate(player.getUUID());
+            player.sendSystemMessage(Messages.good(Lang.of(player), "totpauth.join.premium"));
+            return;
+        }
+
         Optional<UserRecord> record = store.get(name);
 
         // Trusted-IP grace: an ENROLLED player rejoining from the IP they last
@@ -170,7 +187,7 @@ public final class TotpAuthMod implements ModInitializer {
 
         if (record.isEmpty()) {
             player.sendSystemMessage(Messages.warn(Lang.of(player), "totpauth.join.pending"));
-            notifyOps(server, player.nameAndId().name());
+            notifyOps(server, rawName);
         } else if (record.get().state() == UserState.PENDING) {
             Messages.sendSecret(player, totp, record.get().secret());
         } else {

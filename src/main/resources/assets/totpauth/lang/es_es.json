@@ -17,6 +17,7 @@
   "totpauth.list.pending": "Pendientes (%s): %s",
   "totpauth.list.none": "(ninguno)",
   "totpauth.join.trusted_ip": "Bienvenido de nuevo: autenticado automáticamente desde tu IP de confianza.",
+  "totpauth.join.premium": "Bienvenido: tu cuenta de Minecraft ha sido verificada, así que no necesitas código 2FA.",
   "totpauth.join.pending": "Acceso restringido: estás pendiente de aprobación por un administrador. Espera, por favor.",
   "totpauth.join.need_2fa": "Este servidor requiere 2FA. Autentícate con /2fa login <código>.",
   "totpauth.ops.request": "El jugador %s solicita acceso. Usa /2fa approve %s",
